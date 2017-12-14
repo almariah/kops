@@ -27,13 +27,16 @@ import (
 	"github.com/golang/glog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
+	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
 )
 
+//go:generate fitask -type=Instance
 const MaxUserDataSize = 16384
 
 type Instance struct {
 	ID *string
+	Lifecycle *fi.Lifecycle
 
 	UserData fi.Resource
 
@@ -49,6 +52,9 @@ type Instance struct {
 	SecurityGroups     []*SecurityGroup
 	AssociatePublicIP  *bool
 	IAMInstanceProfile *IAMInstanceProfile
+
+	// Shared is set if this is a shared instance (one we don't create or own)
+	Shared *bool
 }
 
 var _ fi.CompareWithID = &Instance{}
@@ -161,6 +167,9 @@ func (e *Instance) Find(c *fi.Context) (*Instance, error) {
 		}
 	}
 
+	actual.Shared = e.Shared
+	actual.Lifecycle = e.Lifecycle
+
 	return actual, nil
 }
 
@@ -180,9 +189,11 @@ func nameFromIAMARN(arn *string) *string {
 }
 
 func (e *Instance) Run(c *fi.Context) error {
-	cloud := c.Cloud.(awsup.AWSCloud)
-
-	cloud.AddTags(e.Name, e.Tags)
+	shared := fi.BoolValue(e.Shared)
+	if !shared {
+		cloud := c.Cloud.(awsup.AWSCloud)
+		cloud.AddTags(e.Name, e.Tags)
+	}
 
 	return fi.DefaultDeltaRunMethod(e, c)
 }
@@ -197,6 +208,11 @@ func (_ *Instance) CheckChanges(a, e, changes *Instance) error {
 }
 
 func (_ *Instance) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *Instance) error {
+	shared := fi.BoolValue(e.Shared)
+	if shared {
+		return nil
+	}
+
 	if a == nil {
 		if e.ImageID == nil {
 			return fi.RequiredField("ImageID")
@@ -281,5 +297,45 @@ func (_ *Instance) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *Instance) err
 }
 
 func (e *Instance) TerraformLink() *terraform.Literal {
+	shared := fi.BoolValue(e.Shared)
+	if shared {
+		if e.ID == nil {
+			glog.Fatalf("ID must be set, if instance is shared: %s", e)
+		}
+		return terraform.LiteralFromStringValue(*e.ID)
+	}
+
+	glog.V(2).Infof("reusing existing instance with id %q", *e.ID)
 	return terraform.LiteralSelfLink("aws_instance", *e.Name)
+}
+
+func (_ *Instance) RenderCloudformation(t *cloudformation.CloudformationTarget, a, e, changes *Instance) error {
+	shared := fi.BoolValue(e.Shared)
+	if shared {
+		if e.ID == nil {
+			glog.Fatalf("ID must be set, if instance is shared: %s", e)
+		}
+	}
+	glog.V(2).Infof("reusing existing instance with id %q", *e.ID)
+
+	// TODO: The instance
+	// If this resource has a public IP address and is also in a VPC that is defined in the same template,
+	// you must use the DependsOn attribute to declare a dependency on the VPC-gateway attachment.
+
+	return nil
+}
+
+func (e *Instance) CloudformationLink() *cloudformation.Literal {
+	glog.V(4).Infof("reusing existing instance with id %q", *e.ID)
+	return cloudformation.LiteralString(*e.ID)
+}
+
+func (_ *Instance) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *Instance) error {
+
+	shared := fi.BoolValue(e.Shared)
+	if shared {
+		// Not terraform owned / managed
+		return nil
+	}
+	return nil
 }

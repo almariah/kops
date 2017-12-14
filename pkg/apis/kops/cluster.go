@@ -156,6 +156,8 @@ type ClusterSpec struct {
 	IAM *IAMSpec `json:"iam,omitempty"`
 	// EncryptionConfig controls if encryption is enabled
 	EncryptionConfig *bool `json:"encryptionConfig,omitempty"`
+
+	AdditionalRoutes []AdditionalRoutesSpec `json:"additionalRoutes,omitempty"`
 }
 
 // FileAssetSpec defines the structure for a file asset
@@ -365,6 +367,12 @@ type HTTPProxy struct {
 	// TODO #3070
 	// User     string `json:"user,omitempty"`
 	// Password string `json:"password,omitempty"`
+}
+
+type AdditionalRoutesSpec struct {
+	CIDR                 *string `json:"cidr,omitempty"`
+	Instance             *string `json:"instance,omitempty"`
+	VpcPeeringConnection *string `json:"vpcPeeringConnection,omitempty"`
 }
 
 // FillDefaults populates default values.
